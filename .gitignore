@@ -2,12 +2,11 @@
 __pycache__/
 *.py[codz]
 *$py.class
-
+firebase_key.json
 # C extensions
 *.so
 
 # Distribution / packaging
-firebase_key.json
 .Python
 build/
 develop-eggs/
