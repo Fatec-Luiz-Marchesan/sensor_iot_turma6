@@ -1,0 +1,6 @@
+pip
+flask
+firebase-admin
+pyserial
+pandas
+google-generativeai
