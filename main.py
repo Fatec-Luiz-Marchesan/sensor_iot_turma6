@@ -38,3 +38,35 @@ def salvar_no_firebase(distancia_atual):
     except Exception as e:
         print(f"Erro do Firebase: {e}")
 
+def ler_porta_serial():
+    global distancia_atual, dados_sensor
+    flag = 0
+    try:
+        ser = serial.Serial(PORTA_SERIAL, BAUD_RATE_RATE, timeout=1)
+        time.sleep(2)
+        print(f"Conectado ao Sensor Arduino na porta: {PORTA_SERIAL}")
+
+        while True:
+            if ser.in_waiting > 0:
+                linha = ser.readline().decode('utf-8').strip()
+
+                if "Distancia: Analogica -" in linha:
+                    try:
+                        valor_str = linha.split("-")[1].strip()
+                        distancia_atual = float(valor_str)
+                        dados_sensor["distancia"] = distancia_atual
+                        dados_sensor["timestamp"] = time.time()
+                        agora = time.time()
+
+                        if agora - flag >= INTERVALO:
+                            salvar_no_firebase(distancia_atual)
+                            dados_sensor["ultima_gravacao_hora"] = time.strftime('%H:%M:%S', time.localtime(agora))
+                            dados_sensor["ultimo_valor_gravado"] = distancia_atual
+                            flag=agora
+                    except ValueError:
+                        pass
+    except Exception as e:
+        print(f"Erro na conector serial Arduino: {e}")
+        print("Verifique os sensores e portas do serial [COM]")
+        time.sleep(5)
+        print("Tentando reconectar...")
