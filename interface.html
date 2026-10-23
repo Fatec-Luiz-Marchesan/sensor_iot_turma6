@@ -51,8 +51,20 @@
     <footer>
         <script>
             function buscarDistancia(){
-                
+                function buscarDistancia(){
+                    fetch('/api/dados')
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('distancia-display').innerHTML = Fixed(2) + '<span class="unidade"> cm</span>'
+                    if(data.ultimo_valor_gravado !== "--"){
+                        document.getElementById('ultimo-valor').innerText = parseFloat(data.ultimo_valor_gravado).toFixed(2)
+                    }else{
+                        document.getElementById('ultima-hora').innerText = data.ultima_gravacao_hora
+                    }
+                    }).catch(error => console.error('Erro de conector Script API: ', error))
+                }
             }
+            setInterval(buscarDistancia, 5000)
         </script>
     </footer>
 </body>
