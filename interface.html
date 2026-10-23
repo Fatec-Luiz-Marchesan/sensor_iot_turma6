@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sensor Distância - SR04</title>
+    <style>
+        body{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
+            padding-top: 10%;
+        }
+        .card{
+            background-color: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgb(0, 0, 0, 0.2); 
+            display: inline-block;
+        }
+        h1{
+            color:#333;
+            margin-top: 0;
+        }
+        .valor{
+            font-size: 5em;
+            font-weight: bold;
+            color: #0078d7;
+        }
+        .unidade{
+            font-size: 0,3em;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Distância Atual</h1>
+        <div class="valor" id="distancia-display"> 
+            --
+            <span class="unidade">cm</span> 
+        </div>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px;">
+        <h3 style="color: #666; font-size: 1.2em; margin-bottom: 10px;">Ultimo Registro no Firebase: (&lt;)</h3>
+        <div style="font-size: 1.5em; color: #333">
+            <span id="Ultimo Valor"> -- </span>
+        </div>
+        <div style="font-size: 0.9em; color: #888; margin-top: 10px;">
+            às <span id="Ultima hora: "> --:--:-- </span>
+        </div>
+    </div>
+    <footer>
+        <script>
+            function buscarDistancia(){
+                
+            }
+        </script>
+    </footer>
+</body>
+</html>
