@@ -1,5 +1,5 @@
 echo "Atualizando Requerimentos..."
-source ./bin/activate
+source ./engine/bin/activate
 pip install --update
 pip install -r requirements.txt
 echo "Sistema Atualizado e Requirimentos Instalados"
