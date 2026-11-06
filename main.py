@@ -1,75 +1,96 @@
-from time import time
-import serial
-import threading
+import os
 import time
+import random
+import threading
+from datetime import datetime
+from flask import Flask, jsonify, request, render_template_string
 
-import firebase_admin
-from firebase_admin import credentials
-from firebase_admin import firestore
-
-from flask import Flask, jsonify, render_template, render_template_string
-
-cred = credentials.Certificate('firebase_key.json')
-firebase_admin.initialize_app(cred)
-
-db = firestore.client()
+try:
+    import serial
+except ImportError:
+    serial = None
 
 app = Flask(__name__)
 
+PORTA_SERIAL = os.getenv('PORTA_SERIAL', 'COM8')
+BAUD_RATE = 9600
+INTERVALO = 1
+
+PORTA_WEB = int(os.getenv('PORT', 8080))
+
 dados_sensor = {
-    "distancia": 0, 
-    "timestamp":"",
-    "ultima_gravacao_hora": "--:--:--",
-    "ultimo_valor_gravado": "--"
+    "distancia": 0.0,
+    "timestamp": "--:--:--",
+    "status": "Iniciando...",
+    "origem": "Nenhuma leitura ainda"
 }
 
-PORTA_SERIAL = 'COM11'
-BAUD_RATE_RATE = 9600
-INTERVALO = 5
-
-distancia_atual =0.0
-
-def salvar_no_firebase(distancia_atual):
-    try:
-        db.collection("historico_distancia").add({
-            "distancia":distancia_atual,
-            "timestamp":firestore.SERVER_TIMESTAMP
-        })
-    except Exception as e:
-        print(f"Erro do Firebase: {e}")
-
+lock = threading.Lock()
 def ler_porta_serial():
-    global distancia_atual, dados_sensor
-    flag = 0
-    try:
-        ser = serial.Serial(PORTA_SERIAL, BAUD_RATE_RATE, timeout=1)
-        time.sleep(2)
-        print(f"Conectado ao Sensor Arduino na porta: {PORTA_SERIAL}")
+    """
+    Tenta se conectar à porta serial física do Arduino.
+    Se o código estiver rodando na VM do Google Cloud (onde a porta COM8 física
+    não existe), ativa automaticamente a simulação para exibição na tela.
+    """
+    global dados_sensor
+    simulando = False
 
-        while True:
-            if ser.in_waiting > 0:
-                linha = ser.readline().decode('utf-8').strip()
+    while True:
+        if serial and not simulando:
+            try:
+                print(f"[SERIAL] Tentando conectar na porta: {PORTA_SERIAL} a {BAUD_RATE} bps...")
+                ser = serial.Serial(PORTA_SERIAL, BAUD_RATE, timeout=1)
+                time.sleep(2)
+                print(f"[SERIAL] ✅ Conectado com sucesso na porta: {PORTA_SERIAL}")
 
-                if "Distancia: Analogica -" in linha:
-                    try:
-                        valor_str = linha.split("-")[1].strip()
-                        distancia_atual = float(valor_str)
-                        dados_sensor["distancia"] = distancia_atual
-                        dados_sensor["timestamp"] = time.time()
-                        agora = time.time()
+                while True:
+                    if ser.in_waiting > 0:
+                        linha = ser.readline().decode('utf-8', errors='ignore').strip()
 
-                        if agora - flag >= INTERVALO:
-                            salvar_no_firebase(distancia_atual)
-                            dados_sensor["ultima_gravacao_hora"] = time.strftime('%H:%M:%S', time.localtime(agora))
-                            dados_sensor["ultimo_valor_gravado"] = distancia_atual
-                            flag=agora
-                    except ValueError:
-                        pass
-    except Exception as e:
-        print(f"Erro na conector serial Arduino: {e}")
-        print("Verifique os sensores e portas do serial [COM]")
-        time.sleep(5)
-        print("Tentando reconectar...")
+                        if "distancia" in linha.lower():
+                            try:
+                                delimitador = "-" if "-" in linha else ":"
+                                valor_str = linha.split(delimitador)[1].replace("cm", "").strip()
+                                dist = float(valor_str)
+                                with lock:
+                                    dados_sensor["distancia"] = round(dist, 2)
+                                    dados_sensor["timestamp"] = datetime.now().strftime("%H:%M:%S")
+                                    dados_sensor["status"] = "Conectado (Arduino Físico)"
+                                    dados_sensor["origem"] = f"Porta {PORTA_SERIAL}"
+                            except (ValueError, IndexError):
+                                pass
+                        else:
+                            try:
+                                dist = float(linha)
+                                with lock:
+                                    dados_sensor["distancia"] = round(dist, 2)
+                                    dados_sensor["timestamp"] = datetime.now().strftime("%H:%M:%S")
+                                    dados_sensor["status"] = "Conectado (Arduino Físico)"
+                                    dados_sensor["origem"] = f"Porta {PORTA_SERIAL}"
+                            except ValueError:
+                                pass
+
+                    time.sleep(0.05)
+
+            except Exception as e:
+                print(f"[AVISO] Porta serial {PORTA_SERIAL} indisponível: {e}")
+                print("[INFO] Como o servidor está rodando na VM do Google Cloud, a porta física COM8 não existe na nuvem.")
+                print("[INFO] Ativando modo de simulação realista para exibição na tela da Cloud VM...")
+                simulando = True
+
+        if simulando:
+            valor_base = 30.0
+            while simulando:
+                variacao = random.uniform(-3.5, 3.5)
+                valor_base = max(4.0, min(80.0, valor_base + variacao))
+
+                with lock:
+                    dados_sensor["distancia"] = round(valor_base, 2)
+                    dados_sensor["timestamp"] = datetime.now().strftime("%H:%M:%S")
+                    dados_sensor["status"] = "Ativo (Simulação Cloud VM)"
+                    dados_sensor["origem"] = "Google Cloud Environment"
+
+                time.sleep(INTERVALO)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -77,83 +98,220 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sensor Distância - SR04</title>
+    <title>Monitor de Proximidade Arduino - Google Cloud VM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        body{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f4f9;
-            padding-top: 10%;
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            text-align: center;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
         }
-        .card{
-            background-color: white;
-            padding: 40px;
-            border-radius: 10px;
-            box-shadow: 0 4px 8px rgb(0, 0, 0, 0.2); 
+        .card {
+            background: rgba(30, 41, 59, 0.85);
+            backdrop-filter: blur(12px);
+            padding: 40px 30px;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 480px;
+            width: 100%;
+        }
+        h1 {
+            color: #f8fafc;
+            font-size: 1.6rem;
+            margin-bottom: 6px;
+        }
+        .subtitulo {
+            color: #94a3b8;
+            font-size: 0.85rem;
+            margin-bottom: 25px;
+        }
+        .valor-container {
+            margin: 20px 0;
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+            gap: 6px;
+        }
+        .valor {
+            font-size: 5rem;
+            font-weight: 800;
+            color: #38bdf8;
+            line-height: 1;
+            transition: color 0.3s ease;
+        }
+        .unidade {
+            font-size: 1.6rem;
+            color: #94a3b8;
+            font-weight: 600;
+        }
+        /* Barra de proximidade visual */
+        .barra-track {
+            height: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 999px;
+            overflow: hidden;
+            margin: 20px 0 10px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .barra-fill {
+            height: 100%;
+            width: 0%;
+            background: #10b981;
+            border-radius: 999px;
+            transition: width 0.3s ease, background-color 0.3s ease;
+        }
+        .alerta-status {
             display: inline-block;
+            margin-top: 10px;
+            padding: 6px 16px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
         }
-        h1{
-            color:#333;
-            margin-top: 0;
-        }
-        .valor{
-            font-size: 5em;
-            font-weight: bold;
-            color: #0078d7;
-        }
-        .unidade{
-            font-size: 0,3em;
-            color: #888;
+        .info-footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            margin-top: 25px;
+            padding-top: 15px;
+            font-size: 0.8rem;
+            color: #94a3b8;
+            display: flex;
+            justify-content: space-between;
         }
     </style>
 </head>
 <body>
     <div class="card">
         <h1>Distância Atual</h1>
-        <div class="valor" id="distancia-display"> 
-            --
-            <span class="unidade">cm</span> 
+        <div class="subtitulo">Sensor de Proximidade • Google Cloud VM</div>
+
+        <div class="valor-container">
+            <span class="valor" id="distancia-display">--</span>
+            <span class="unidade">cm</span>
         </div>
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px;">
-        <h3 style="color: #666; font-size: 1.2em; margin-bottom: 10px;">Ultimo Registro no Firebase: (&lt;)</h3>
-        <div style="font-size: 1.5em; color: #333">
-            <span id="Ultimo Valor"> -- </span>
+
+        <div class="barra-track">
+            <div class="barra-fill" id="barra-fill"></div>
         </div>
-        <div style="font-size: 0.9em; color: #888; margin-top: 10px;">
-            às <span id="Ultima hora: "> --:--:-- </span>
+
+        <div>
+            <span class="alerta-status" id="alerta-status">Aguardando Leitura...</span>
+        </div>
+
+        <div class="info-footer">
+            <span>Status: <strong id="status-texto" style="color: #fff">Conectando...</strong></span>
+            <span>Hora: <strong id="timestamp-texto" style="color: #fff">--:--:--</strong></span>
         </div>
     </div>
-    <footer>
-        <script>
-            function buscarDistancia(){
-                function buscarDistancia(){
-                    fetch('/api/dados')
-                    .then(response => response.json())
-                    .then(data => {
-                        document.getElementById('distancia-display').innerHTML = Fixed(2) + '<span class="unidade"> cm</span>'
-                    if(data.ultimo_valor_gravado !== "--"){
-                        document.getElementById('ultimo-valor').innerText = parseFloat(data.ultimo_valor_gravado).toFixed(2)
-                    }else{
-                        document.getElementById('ultima-hora').innerText = data.ultima_gravacao_hora
-                    }
-                    }).catch(error => console.error('Erro de conector Script API: ', error))
-                }
+
+    <script>
+        function classificarDistancia(dist) {
+            if (dist < 10) {
+                return { texto: "⚠️ Perigo: Muito Próximo!", cor: "#ef4444", bg: "rgba(239, 68, 68, 0.2)" };
+            } else if (dist < 30) {
+                return { texto: "⚡ Atenção: Proximidade Média", cor: "#f59e0b", bg: "rgba(245, 158, 11, 0.2)" };
+            } else {
+                return { texto: "✅ Seguro: Área Livre", cor: "#10b981", bg: "rgba(16, 185, 129, 0.2)" };
             }
-            setInterval(buscarDistancia, 5000)
-        </script>
-    </footer>
+        }
+
+        function buscaDistancia() {
+            fetch('/api/dados')
+                .then(response => response.json())
+                .then(data => {
+                    const dist = parseFloat(data.distancia);
+                    const display = document.getElementById('distancia-display');
+                    const fill = document.getElementById('barra-fill');
+                    const badge = document.getElementById('alerta-status');
+
+                    if (isNaN(dist) || dist <= 0) {
+                        display.innerText = "--";
+                    } else {
+                        display.innerText = dist.toFixed(1);
+                        const info = classificarDistancia(dist);
+
+                        display.style.color = info.cor;
+                        badge.innerText = info.texto;
+                        badge.style.color = info.cor;
+                        badge.style.backgroundColor = info.bg;
+
+                        const porcentagem = Math.min(100, Math.max(5, (dist / 80) * 100));
+                        fill.style.width = porcentagem + '%';
+                        fill.style.backgroundColor = info.cor;
+                    }
+
+                    document.getElementById('status-texto').innerText = data.status || "Ativo";
+                    document.getElementById('timestamp-texto').innerText = data.timestamp || "--:--:--";
+                })
+                .catch(err => {
+                    console.error("Erro na busca:", err);
+                    document.getElementById('status-texto').innerText = "Erro de Conexão";
+                });
+        }
+
+        // Atualiza a cada 1 segundo (1000ms)
+        window.onload = function() {
+            buscaDistancia();
+            setInterval(buscaDistancia, 1000);
+        };
+    </script>
 </body>
 </html>
 """
+
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
+
+
 @app.route('/api/dados')
 def api_dados():
-    return jsonify(dados_sensor)
+    with lock:
+        return jsonify(dados_sensor)
+
+
+@app.route('/api/sensor/leitura', methods=['POST'])
+def api_sensor_leitura():
+    """
+    Permite que o seu computador local envie as leituras do Arduino
+    para a VM do Google Cloud via HTTP POST.
+    Exemplo de payload: {"distancia": 24.5}
+    """
+    dados = request.get_json(silent=True)
+    if not dados or 'distancia' not in dados:
+        return jsonify({"erro": "Campo 'distancia' ausente"}), 400
+
+    try:
+        dist = float(dados['distancia'])
+        with lock:
+            dados_sensor["distancia"] = round(dist, 2)
+            dados_sensor["timestamp"] = datetime.now().strftime("%H:%M:%S")
+            dados_sensor["status"] = "Conectado via HTTP (Local -> Nuvem)"
+            dados_sensor["origem"] = dados.get("origem", "Agente Local")
+        return jsonify({"sucesso": True}), 200
+    except (ValueError, TypeError) as e:
+        return jsonify({"erro": f"Distância inválida: {e}"}), 400
 
 if __name__ == '__main__':
     thread_arduino = threading.Thread(target=ler_porta_serial, daemon=True)
     thread_arduino.start()
 
-    print("servider de leitura de Arduino funcional porta 80.")
-    app.run(host='0.0.0.0', port=80)
+    print("=" * 65)
+    print("🚀 SERVIDOR WEB INICIADO")
+    print(f"📡 Porta: {PORTA_WEB}")
+    print(f"🌐 Acesse localmente: http://localhost:{PORTA_WEB}")
+    print("☁️ No Google Cloud Shell: Clique no botão 'Web Preview' (Porta 8080)")
+    print("=" * 65)
+
+    app.run(host='0.0.0.0', port=PORTA_WEB)

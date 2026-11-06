@@ -4,3 +4,7 @@ firebase-admin
 pyserial
 pandas
 google-generativeai
+Flask>=3.0.0
+pandas
+pyserial>=3.5
+requests>=2.31.0
